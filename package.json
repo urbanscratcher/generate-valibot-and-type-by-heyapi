@@ -1,0 +1,27 @@
+{
+  "name": "open-api-autogen",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "NODE_OPTIONS=--max-old-space-size=8192 next dev",
+    "build": "NODE_OPTIONS=--max-old-space-size=8192 next build",
+    "start": "NODE_OPTIONS=--max-old-space-size=8192 next start",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@hey-api/openapi-ts": "^0.94.4",
+    "highlight.js": "^11.11.1",
+    "next": "^15.2.4",
+    "prettier": "^3.3.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "yaml": "^2.6.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "typescript": "^5.7.2"
+  }
+}
