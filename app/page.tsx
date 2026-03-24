@@ -43,7 +43,7 @@ const groups = [
   },
 ];
 
-function groupFiles(files: GeneratedFile[]) {
+function groupFiles(files: GeneratedFile[]): Map<string, GeneratedFile[]> {
   const bucketed = new Map<string, GeneratedFile[]>();
   groups.forEach((group) => bucketed.set(group.id, []));
 
@@ -94,7 +94,10 @@ export default function Page() {
     }
   }, []);
 
-  const groupedFiles = useMemo(() => (result ? groupFiles(result.files) : new Map()), [result]);
+  const groupedFiles = useMemo(
+    () => (result ? groupFiles(result.files) : new Map<string, GeneratedFile[]>()),
+    [result]
+  );
 
   const filteredFiles = useMemo(() => {
     const files = groupedFiles.get(activeGroup) ?? [];
