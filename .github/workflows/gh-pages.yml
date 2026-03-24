@@ -1,0 +1,43 @@
+name: Build OpenAPI Pages
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * *"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        env:
+          OPENAPI_SOURCES: ${{ secrets.OPENAPI_SOURCES }}
+          NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
+        run: pnpm build
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./out
+          force_orphan: true

@@ -17,7 +17,6 @@ type GenerateResponse = {
   sourceUrl: string;
   generatedAt: string;
   sessionId: string;
-  cacheKey?: string;
 };
 
 type BuildSource = {
@@ -72,43 +71,25 @@ function groupFiles(files: GeneratedFile[]): Map<string, GeneratedFile[]> {
 }
 
 export default function Page() {
-  const isLocal = process.env.NODE_ENV === "development";
-  const [url, setUrl] = useState("");
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+  const withBasePath = (path: string) => (basePath ? `${basePath}${path}` : path);
+
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [activeGroup, setActiveGroup] = useState("tanstack");
   const [result, setResult] = useState<GenerateResponse | null>(null);
-  const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
   const [error, setError] = useState<string>("");
   const [fileContents, setFileContents] = useState<Record<string, string>>({});
   const [fileLoading, setFileLoading] = useState<Record<string, boolean>>({});
-  const [localFile, setLocalFile] = useState<File | null>(null);
-  const [toast, setToast] = useState("");
-  const [rememberUrl, setRememberUrl] = useState(true);
   const [openFile, setOpenFile] = useState<string | null>(null);
   const [buildSources, setBuildSources] = useState<BuildSource[]>([]);
   const [activeSourceId, setActiveSourceId] = useState<string | null>(null);
   const codeRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    if (isLocal) {
-      const saved = localStorage.getItem("openapi-last-url");
-      if (saved) {
-        setUrl(saved);
-        setSearchInput("");
-        setSearchQuery("");
-      }
-      const remember = localStorage.getItem("openapi-remember-url");
-      if (remember === "0") {
-        setRememberUrl(false);
-      }
-    }
-  }, [isLocal]);
-
-  useEffect(() => {
     const loadSources = async () => {
       try {
-        const response = await fetch("/openapi/index.json");
+        const response = await fetch(withBasePath("/openapi/index.json"));
         if (!response.ok) return;
         const payload = (await response.json()) as { sources?: BuildSource[] };
         if (payload.sources) {
@@ -119,7 +100,7 @@ export default function Page() {
       }
     };
     void loadSources();
-  }, []);
+  }, [basePath]);
 
   const groupedFiles = useMemo(
     () => (result ? groupFiles(result.files) : new Map<string, GeneratedFile[]>()),
@@ -145,137 +126,32 @@ export default function Page() {
     setOpenFile(target.path);
   }
 
-  async function generateWithUrl(targetUrl: string, shouldRemember: boolean) {
-    if (targetUrl.trim().length === 0) {
-      setError("OpenAPI JSON 또는 YAML 주소를 입력해 주세요.");
-      setStatus("error");
-      return;
-    }
-    setStatus("loading");
+  async function handleSelectSource(source: BuildSource) {
     setError("");
-    setResult(null);
-
-    try {
-      const response = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: targetUrl.trim() }),
-      });
-
-      if (response.ok === false) {
-        const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.message || "생성에 실패했어요.");
-      }
-
-      const data = (await response.json()) as GenerateResponse;
-      if (isLocal) {
-        if (shouldRemember) {
-          localStorage.setItem("openapi-last-url", targetUrl.trim());
-          localStorage.setItem("openapi-remember-url", "1");
-        } else {
-          localStorage.removeItem("openapi-last-url");
-          localStorage.setItem("openapi-remember-url", "0");
-        }
-      }
-      setResult(data);
-      setFileContents({});
-      setFileLoading({});
-      setOpenFile(null);
-      setStatus("idle");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "알 수 없는 오류가 발생했어요.");
-      setStatus("error");
-    }
-  }
-
-  async function handleGenerate() {
-    await generateWithUrl(url, rememberUrl);
-  }
-
-  async function handleGenerateFromEnv(source: BuildSource) {
-    setUrl("");
-    setStatus("loading");
-    setError("");
-    setResult(null);
-
-    try {
-      setActiveSourceId(source.id);
-      setResult({
-        files: source.files ?? [],
-        sourceUrl: source.label,
-        generatedAt: source.generatedAt ?? new Date().toISOString(),
-        sessionId: "",
-      });
-      setFileContents({});
-      setFileLoading({});
-      setOpenFile(null);
-      setStatus("idle");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "알 수 없는 오류가 발생했어요.");
-      setStatus("error");
-    }
-  }
-
-  async function handleGenerateFile() {
-    if (localFile === null) {
-      setError("업로드할 OpenAPI 파일을 선택해 주세요.");
-      setStatus("error");
-      return;
-    }
-    setStatus("loading");
-    setError("");
-    setResult(null);
-
-    try {
-      const formData = new FormData();
-      formData.append("spec", localFile);
-      const response = await fetch("/api/generate-file", {
-        method: "POST",
-        body: formData,
-      });
-      if (response.ok === false) {
-        const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.message || "생성에 실패했어요.");
-      }
-      const data = (await response.json()) as GenerateResponse;
-      setResult(data);
-      setFileContents({});
-      setFileLoading({});
-      setOpenFile(null);
-      setStatus("idle");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "알 수 없는 오류가 발생했어요.");
-      setStatus("error");
-    }
+    setActiveSourceId(source.id);
+    setResult({
+      files: source.files ?? [],
+      sourceUrl: source.label,
+      generatedAt: source.generatedAt ?? new Date().toISOString(),
+      sessionId: "",
+    });
+    setFileContents({});
+    setFileLoading({});
+    setOpenFile(null);
   }
 
   async function loadFile(path: string) {
     if (result === null) return;
     if (fileContents[path] || fileLoading[path]) return;
+    if (!activeSourceId) return;
     setFileLoading((prev) => ({ ...prev, [path]: true }));
     try {
-      if (activeSourceId && !result.cacheKey && !result.sessionId) {
-        const response = await fetch(`/openapi/${activeSourceId}/${path}`);
-        if (response.ok === false) {
-          throw new Error("파일을 불러오지 못했어요.");
-        }
-        const content = await response.text();
-        setFileContents((prev) => ({ ...prev, [path]: content }));
-      } else {
-        const query = new URLSearchParams({
-          sessionId: result.sessionId,
-          path,
-        });
-        if (result.cacheKey) {
-          query.set("cacheKey", result.cacheKey);
-        }
-        const response = await fetch(`/api/file?${query.toString()}`);
-        if (response.ok === false) {
-          throw new Error("파일을 불러오지 못했어요.");
-        }
-        const payload = (await response.json()) as { path: string; content: string };
-        setFileContents((prev) => ({ ...prev, [payload.path]: payload.content }));
+      const response = await fetch(withBasePath(`/openapi/${activeSourceId}/${path}`));
+      if (response.ok === false) {
+        throw new Error("파일을 불러오지 못했어요.");
       }
+      const content = await response.text();
+      setFileContents((prev) => ({ ...prev, [path]: content }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "파일을 불러오는 중 오류가 발생했어요.");
     } finally {
@@ -296,46 +172,6 @@ export default function Page() {
     <div className="app">
       <h1>OpenAPI Snippet</h1>
       <div className="panel">
-        {isLocal ? (
-          <>
-            <label htmlFor="openapi-url">OpenAPI URL</label>
-            <input
-              id="openapi-url"
-              type="text"
-              placeholder="https://api.example.com/v3/api-docs"
-              value={url}
-              onChange={(event) => setUrl(event.target.value)}
-            />
-            <button onClick={handleGenerate} disabled={status === "loading"}>
-              {status === "loading" ? "생성 중…" : "생성"}
-            </button>
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={rememberUrl}
-                onChange={(event) => {
-                  const next = event.target.checked;
-                  setRememberUrl(next);
-                  localStorage.setItem("openapi-remember-url", next ? "1" : "0");
-                  if (next === false) {
-                    localStorage.removeItem("openapi-last-url");
-                  }
-                }}
-              />
-              이전 URL 저장
-            </label>
-            <div className="divider">또는 파일 업로드</div>
-            <input
-              type="file"
-              accept=".json,.yaml,.yml"
-              onChange={(event) => setLocalFile(event.target.files?.[0] ?? null)}
-            />
-            <button onClick={handleGenerateFile} disabled={status === "loading"}>
-              {status === "loading" ? "생성 중…" : "파일로 생성"}
-            </button>
-          </>
-        ) : null}
-
         {buildSources.length > 0 ? (
           <div className="env-buttons">
             {buildSources.map((source) => (
@@ -343,14 +179,14 @@ export default function Page() {
                 key={source.id}
                 type="button"
                 onClick={() => {
-                  void handleGenerateFromEnv(source);
+                  void handleSelectSource(source);
                 }}
               >
                 {source.label}
               </button>
             ))}
           </div>
-        ) : isLocal ? null : (
+        ) : (
           <p>설정된 OpenAPI 소스가 없어요.</p>
         )}
         {error && <p className="error">{error}</p>}
@@ -419,9 +255,8 @@ export default function Page() {
           )}
         </div>
       ) : (
-        <p>URL 또는 파일을 넣고 생성하세요.</p>
+        <p>버튼을 눌러 생성된 코드를 확인하세요.</p>
       )}
-      {toast ? <div className="toast">{toast}</div> : null}
 
       {openFile ? (
         <div className="overlay">

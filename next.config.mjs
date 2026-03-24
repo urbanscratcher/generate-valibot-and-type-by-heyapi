@@ -1,12 +1,11 @@
 /** @type {import('next').NextConfig} */
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+
 const nextConfig = {
-  serverExternalPackages: ["@hey-api/openapi-ts"],
-  outputFileTracingIncludes: {
-    "/api/**": [
-      "node_modules/@hey-api/**",
-      "node_modules/.pnpm/**/node_modules/@hey-api/**"
-    ]
-  }
+  output: "export",
+  basePath,
+  assetPrefix: basePath,
+  images: { unoptimized: true },
 };
 
 export default nextConfig;
