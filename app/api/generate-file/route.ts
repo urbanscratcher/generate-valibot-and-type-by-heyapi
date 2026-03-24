@@ -6,6 +6,9 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   try {
+    if (process.env.NODE_ENV !== "development") {
+      return NextResponse.json({ message: "로컬 환경에서만 생성할 수 있어요." }, { status: 403 });
+    }
     const formData = await req.formData();
     const file = formData.get("spec");
     if (!file || !(file instanceof File)) {

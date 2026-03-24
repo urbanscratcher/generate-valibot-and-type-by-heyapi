@@ -7,8 +7,24 @@ import { parse as parseYaml } from "yaml";
 
 const SESSION_TTL_MS = 10 * 60 * 1000;
 const CACHE_TTL_MS = 30 * 60 * 1000;
-const CACHE_BASE = process.env.VERCEL ? os.tmpdir() : process.cwd();
-const CACHE_ROOT = path.join(CACHE_BASE, ".cache", "openapi");
+function resolveCacheRoot() {
+  const base = process.env.OPENAPI_CACHE_BASE
+    ? path.resolve(process.env.OPENAPI_CACHE_BASE)
+    : process.env.VERCEL
+      ? os.tmpdir()
+      : process.cwd();
+  const normalized = path.normalize(base);
+  const cacheSuffix = path.join(".cache", "openapi");
+  if (normalized.endsWith(cacheSuffix)) {
+    return normalized;
+  }
+  if (path.basename(normalized) === ".cache") {
+    return path.join(normalized, "openapi");
+  }
+  return path.join(normalized, ".cache", "openapi");
+}
+
+const CACHE_ROOT = resolveCacheRoot();
 
 const sessions = new Map<string, { createdAt: number; baseDir: string }>();
 const cache = new Map<
@@ -35,6 +51,10 @@ export type GenerateResult = {
   generatedAt: string;
   cacheKey: string;
 };
+
+function isBuildCacheKey(key: string) {
+  return key.startsWith("build:");
+}
 
 async function ensureCacheReady() {
   if (cacheReady) return;
@@ -319,19 +339,21 @@ function setCache(
 ) {
   cache.set(key, entry);
   void writeCacheToDisk(key, entry);
-  setTimeout(() => {
-    const cached = cache.get(key);
-    if (cached == null) return;
-    if (Date.now() - cached.createdAt > CACHE_TTL_MS) {
-      cache.delete(key);
-    }
-  }, CACHE_TTL_MS);
+  if (!isBuildCacheKey(key)) {
+    setTimeout(() => {
+      const cached = cache.get(key);
+      if (cached == null) return;
+      if (Date.now() - cached.createdAt > CACHE_TTL_MS) {
+        cache.delete(key);
+      }
+    }, CACHE_TTL_MS);
+  }
 }
 
 function getCache(key: string) {
   const cached = cache.get(key);
   if (cached) {
-    if (Date.now() - cached.createdAt > CACHE_TTL_MS) {
+    if (!isBuildCacheKey(key) && Date.now() - cached.createdAt > CACHE_TTL_MS) {
       cache.delete(key);
       return null;
     }
@@ -434,7 +456,7 @@ function readCacheFromDisk(cacheKey: string) {
       createdAt: number;
       files: { path: string; lines: number; chars: number }[];
     };
-    if (Date.now() - meta.createdAt > CACHE_TTL_MS) {
+    if (!isBuildCacheKey(cacheKey) && Date.now() - meta.createdAt > CACHE_TTL_MS) {
       return null;
     }
     return {

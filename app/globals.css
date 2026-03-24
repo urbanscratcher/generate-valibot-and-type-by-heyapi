@@ -42,6 +42,12 @@ h1 {
   cursor: pointer;
 }
 
+.env-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .checkbox {
   display: flex;
   gap: 6px;
