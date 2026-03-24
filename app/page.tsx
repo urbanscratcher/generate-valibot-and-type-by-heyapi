@@ -24,6 +24,7 @@ type BuildSource = {
   id: string;
   label: string;
   generatedAt?: string;
+  files?: GeneratedFile[];
 };
 
 const groups = [
@@ -86,6 +87,7 @@ export default function Page() {
   const [rememberUrl, setRememberUrl] = useState(true);
   const [openFile, setOpenFile] = useState<string | null>(null);
   const [buildSources, setBuildSources] = useState<BuildSource[]>([]);
+  const [activeSourceId, setActiveSourceId] = useState<string | null>(null);
   const codeRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -106,7 +108,7 @@ export default function Page() {
   useEffect(() => {
     const loadSources = async () => {
       try {
-        const response = await fetch("/api/build");
+        const response = await fetch("/openapi/index.json");
         if (!response.ok) return;
         const payload = (await response.json()) as { sources?: BuildSource[] };
         if (payload.sources) {
@@ -197,14 +199,13 @@ export default function Page() {
     setResult(null);
 
     try {
-      const query = new URLSearchParams({ id: source.id });
-      const response = await fetch(`/api/build?${query.toString()}`);
-      if (response.ok === false) {
-        const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.message || "빌드된 결과를 불러오지 못했어요.");
-      }
-      const data = (await response.json()) as GenerateResponse;
-      setResult(data);
+      setActiveSourceId(source.id);
+      setResult({
+        files: source.files ?? [],
+        sourceUrl: source.label,
+        generatedAt: source.generatedAt ?? new Date().toISOString(),
+        sessionId: "",
+      });
       setFileContents({});
       setFileLoading({});
       setOpenFile(null);
@@ -253,19 +254,28 @@ export default function Page() {
     if (fileContents[path] || fileLoading[path]) return;
     setFileLoading((prev) => ({ ...prev, [path]: true }));
     try {
-      const query = new URLSearchParams({
-        sessionId: result.sessionId,
-        path,
-      });
-      if (result.cacheKey) {
-        query.set("cacheKey", result.cacheKey);
+      if (activeSourceId && !result.cacheKey && !result.sessionId) {
+        const response = await fetch(`/openapi/${activeSourceId}/${path}`);
+        if (response.ok === false) {
+          throw new Error("파일을 불러오지 못했어요.");
+        }
+        const content = await response.text();
+        setFileContents((prev) => ({ ...prev, [path]: content }));
+      } else {
+        const query = new URLSearchParams({
+          sessionId: result.sessionId,
+          path,
+        });
+        if (result.cacheKey) {
+          query.set("cacheKey", result.cacheKey);
+        }
+        const response = await fetch(`/api/file?${query.toString()}`);
+        if (response.ok === false) {
+          throw new Error("파일을 불러오지 못했어요.");
+        }
+        const payload = (await response.json()) as { path: string; content: string };
+        setFileContents((prev) => ({ ...prev, [payload.path]: payload.content }));
       }
-      const response = await fetch(`/api/file?${query.toString()}`);
-      if (response.ok === false) {
-        throw new Error("파일을 불러오지 못했어요.");
-      }
-      const payload = (await response.json()) as { path: string; content: string };
-      setFileContents((prev) => ({ ...prev, [payload.path]: payload.content }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "파일을 불러오는 중 오류가 발생했어요.");
     } finally {

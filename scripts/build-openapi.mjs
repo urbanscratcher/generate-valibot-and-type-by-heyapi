@@ -1,26 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import crypto from "node:crypto";
 import { parse as parseYaml } from "yaml";
 
-function resolveCacheRoot() {
-  const base = process.env.OPENAPI_CACHE_BASE
-    ? path.resolve(process.env.OPENAPI_CACHE_BASE)
-    : process.cwd();
-  const normalized = path.normalize(base);
-  const cacheSuffix = path.join(".cache", "openapi");
-  if (normalized.endsWith(cacheSuffix)) {
-    return normalized;
-  }
-  if (path.basename(normalized) === ".cache") {
-    return path.join(normalized, "openapi");
-  }
-  return path.join(normalized, ".cache", "openapi");
-}
-
-const CACHE_ROOT = resolveCacheRoot();
-const BUILD_INDEX_PATH = path.join(CACHE_ROOT, "build-index.json");
+const PUBLIC_ROOT = path.join(process.cwd(), "public", "openapi");
+const BUILD_INDEX_PATH = path.join(PUBLIC_ROOT, "index.json");
 
 function parseEnvSources(raw, legacyUrl) {
   const trimmed = (raw ?? "").trim();
@@ -151,38 +135,11 @@ async function readFiles(dir, base = dir) {
   return files.sort((a, b) => a.path.localeCompare(b.path));
 }
 
-function cacheDirForKey(cacheKey) {
-  const hash = crypto.createHash("sha256").update(cacheKey).digest("hex");
-  return path.join(CACHE_ROOT, hash);
-}
-
-async function writeCacheToDisk(cacheKey, entry) {
-  const dir = cacheDirForKey(cacheKey);
-  const filesDir = path.join(dir, "files");
-  await fs.mkdir(filesDir, { recursive: true });
-  const meta = {
-    cacheKey,
-    createdAt: entry.createdAt,
-    files: entry.files,
-  };
-  await fs.writeFile(path.join(dir, "meta.json"), JSON.stringify(meta, null, 2), "utf8");
-
-  await Promise.all(
-    entry.files.map(async (file) => {
-      const src = path.join(entry.baseDir, file.path);
-      const dest = path.join(filesDir, file.path);
-      await fs.mkdir(path.dirname(dest), { recursive: true });
-      await fs.copyFile(src, dest);
-    })
-  );
-}
-
 async function buildSource(source) {
   const raw = await downloadSpec(source.url);
   const { spec, isJson } = parseSpec(raw);
   validateOpenApi(spec, raw);
   const version = getSpecVersion(spec);
-  const cacheKey = `build:${source.id}::${version}`;
 
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "openapi-build-"));
   try {
@@ -199,19 +156,17 @@ async function buildSource(source) {
       chars: file.content.length,
     }));
 
-    await writeCacheToDisk(cacheKey, {
-      createdAt: Date.now(),
-      files: fileMeta,
-      baseDir: outDir,
-    });
+    const targetDir = path.join(PUBLIC_ROOT, source.id);
+    await fs.rm(targetDir, { recursive: true, force: true });
+    await fs.mkdir(targetDir, { recursive: true });
+    await fs.cp(outDir, targetDir, { recursive: true });
 
     return {
       id: source.id,
       label: source.label,
-      url: source.url,
-      cacheKey,
       generatedAt: new Date().toISOString(),
       files: fileMeta,
+      version,
     };
   } finally {
     await fs.rm(workDir, { recursive: true, force: true });
@@ -225,10 +180,10 @@ async function main() {
     process.env.DOL_ADMIN ?? ""
   );
 
-  await fs.mkdir(CACHE_ROOT, { recursive: true });
+  await fs.mkdir(PUBLIC_ROOT, { recursive: true });
 
   if (sources.length === 0) {
-    await fs.writeFile(BUILD_INDEX_PATH, JSON.stringify([], null, 2), "utf8");
+    await fs.writeFile(BUILD_INDEX_PATH, JSON.stringify({ sources: [] }, null, 2), "utf8");
     console.log("No OpenAPI sources configured for build.");
     return;
   }
@@ -240,7 +195,7 @@ async function main() {
     entries.push(entry);
   }
 
-  await fs.writeFile(BUILD_INDEX_PATH, JSON.stringify(entries, null, 2), "utf8");
+  await fs.writeFile(BUILD_INDEX_PATH, JSON.stringify({ sources: entries }, null, 2), "utf8");
   console.log(`OpenAPI build complete. (${entries.length} sources)`);
 }
 
