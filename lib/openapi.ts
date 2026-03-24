@@ -11,7 +11,8 @@ const execFileAsync = promisify(execFile);
 
 const SESSION_TTL_MS = 10 * 60 * 1000;
 const CACHE_TTL_MS = 30 * 60 * 1000;
-const CACHE_ROOT = path.join(process.cwd(), ".cache", "openapi");
+const CACHE_BASE = process.env.VERCEL ? os.tmpdir() : process.cwd();
+const CACHE_ROOT = path.join(CACHE_BASE, ".cache", "openapi");
 
 const sessions = new Map<string, { createdAt: number; baseDir: string }>();
 const cache = new Map<
