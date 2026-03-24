@@ -3,11 +3,7 @@ import fsSync from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { parse as parseYaml } from "yaml";
-
-const execFileAsync = promisify(execFile);
 
 const SESSION_TTL_MS = 10 * 60 * 1000;
 const CACHE_TTL_MS = 30 * 60 * 1000;
@@ -200,53 +196,34 @@ async function handleGeneration(
 }
 
 async function runGenerator(inputPath: string, outDir: string) {
-  const scriptLines = [
-    "import { createClient } from '@hey-api/openapi-ts';",
-    "",
-    "await createClient({",
-    "  input: " + JSON.stringify(inputPath) + ",",
-    "  output: {",
-    "    format: 'prettier',",
-    "    lint: 'eslint',",
-    "    path: " + JSON.stringify(outDir),
-    "  },",
-    "  plugins: [",
-    "    { name: '@hey-api/schemas', type: 'json' },",
-    "    '@hey-api/typescript',",
-    "    { name: '@hey-api/client-fetch' },",
-    "    {",
-    "      name: 'valibot',",
-    "      '~resolvers': {",
-    "        string(ctx) {",
-    "          const { $, schema, symbols } = ctx;",
-    "          const { v } = symbols;",
-    "          if (schema.format === 'binary') {",
-    "            return $(v).attr('file').call();",
-    "          }",
-    "        }",
-    "      }",
-    "    },",
-    "    { name: '@hey-api/sdk', validator: 'valibot' },",
-    "    '@tanstack/react-query'",
-    "  ]",
-    "});",
-    "",
-  ];
-  const script = scriptLines.join("\n");
-  await fs.mkdir(CACHE_ROOT, { recursive: true });
-  const scriptPath = path.join(CACHE_ROOT, "openapi-gen-run-" + crypto.randomUUID() + ".mjs");
-  await fs.writeFile(scriptPath, script, "utf8");
-  try {
-    await execFileAsync(process.execPath, ["--max-old-space-size=8192", scriptPath], {
-      cwd: process.cwd(),
-      env: {
-        ...process.env,
-        NODE_PATH: path.join(process.cwd(), "node_modules"),
+  const { createClient } = await import("@hey-api/openapi-ts");
+  await createClient({
+    input: inputPath,
+    output: {
+      format: "prettier",
+      lint: "eslint",
+      path: outDir,
+    },
+    plugins: [
+      { name: "@hey-api/schemas", type: "json" },
+      "@hey-api/typescript",
+      { name: "@hey-api/client-fetch" },
+      {
+        name: "valibot",
+        "~resolvers": {
+          string(ctx: any) {
+            const { $, schema, symbols } = ctx;
+            const { v } = symbols;
+            if (schema.format === "binary") {
+              return $(v).attr("file").call();
+            }
+          },
+        },
       },
-    });
-  } finally {
-    await fs.rm(scriptPath, { force: true });
-  }
+      { name: "@hey-api/sdk", validator: "valibot" },
+      "@tanstack/react-query",
+    ],
+  });
 }
 
 async function readFiles(dir: string, base = dir): Promise<{ path: string; content: string }[]> {
