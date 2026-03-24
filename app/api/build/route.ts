@@ -36,13 +36,20 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
-    if (!id) {
-      return NextResponse.json({ message: "id 값이 필요해요." }, { status: 400 });
-    }
 
     const indexPath = path.join(getCacheRoot(), "build-index.json");
     const raw = await fs.readFile(indexPath, "utf8");
     const entries = JSON.parse(raw) as BuildIndexEntry[];
+    if (!id) {
+      return NextResponse.json({
+        sources: entries.map((entry) => ({
+          id: entry.id,
+          label: entry.label,
+          generatedAt: entry.generatedAt,
+        })),
+      });
+    }
+
     const entry = entries.find((item) => item.id === id);
     if (!entry) {
       return NextResponse.json({ message: "빌드된 결과를 찾지 못했어요." }, { status: 404 });
@@ -50,7 +57,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json({
       files: entry.files,
-      sourceUrl: entry.url,
+      sourceUrl: entry.label,
       generatedAt: entry.generatedAt,
       sessionId: "",
       cacheKey: entry.cacheKey,

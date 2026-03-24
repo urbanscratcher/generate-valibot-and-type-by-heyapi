@@ -20,10 +20,10 @@ type GenerateResponse = {
   cacheKey?: string;
 };
 
-type EnvSource = {
+type BuildSource = {
   id: string;
   label: string;
-  url: string;
+  generatedAt?: string;
 };
 
 const groups = [
@@ -70,61 +70,8 @@ function groupFiles(files: GeneratedFile[]): Map<string, GeneratedFile[]> {
   return bucketed;
 }
 
-function parseEnvSources(raw: string, legacyUrl: string): EnvSource[] {
-  const trimmed = raw.trim();
-  if (trimmed.length > 0) {
-    try {
-      const parsed = JSON.parse(trimmed) as unknown;
-      if (Array.isArray(parsed)) {
-        return parsed
-          .map((item, index) => {
-            if (!item || typeof item !== "object") return null;
-            const record = item as Record<string, unknown>;
-            const label = typeof record.label === "string" ? record.label : null;
-            const url = typeof record.url === "string" ? record.url : null;
-            const id = typeof record.id === "string" ? record.id : `env-${index}`;
-            if (!label || !url) return null;
-            return { id, label, url };
-          })
-          .filter((item): item is EnvSource => Boolean(item));
-      }
-      if (parsed && typeof parsed === "object") {
-        return Object.entries(parsed as Record<string, unknown>)
-          .map(([label, value], index) => {
-            if (typeof value !== "string") return null;
-            return { id: `env-${index}`, label, url: value };
-          })
-          .filter((item): item is EnvSource => Boolean(item));
-      }
-    } catch (err) {
-      // Fall through to string parsing
-    }
-
-    return trimmed
-      .split(/[\n,]+/)
-      .map((entry, index) => {
-        const [label, url] = entry.split("|").map((part) => part.trim());
-        if (!label || !url) return null;
-        return { id: `env-${index}`, label, url };
-      })
-      .filter((item): item is EnvSource => Boolean(item));
-  }
-
-  if (legacyUrl.trim().length > 0) {
-    return [{ id: "dol_admin", label: "DOL_ADMIN", url: legacyUrl.trim() }];
-  }
-  return [];
-}
-
-
 export default function Page() {
-  const envUrl = process.env.NEXT_PUBLIC_DOL_ADMIN ?? "";
-  const envSourcesRaw = process.env.NEXT_PUBLIC_OPENAPI_SOURCES ?? "";
   const isLocal = process.env.NODE_ENV === "development";
-  const envSources = useMemo(
-    () => parseEnvSources(envSourcesRaw, envUrl),
-    [envSourcesRaw, envUrl]
-  );
   const [url, setUrl] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -138,6 +85,7 @@ export default function Page() {
   const [toast, setToast] = useState("");
   const [rememberUrl, setRememberUrl] = useState(true);
   const [openFile, setOpenFile] = useState<string | null>(null);
+  const [buildSources, setBuildSources] = useState<BuildSource[]>([]);
   const codeRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -152,11 +100,24 @@ export default function Page() {
       if (remember === "0") {
         setRememberUrl(false);
       }
-      if (!saved && envUrl) {
-        setUrl(envUrl);
-      }
     }
-  }, [envUrl, isLocal]);
+  }, [isLocal]);
+
+  useEffect(() => {
+    const loadSources = async () => {
+      try {
+        const response = await fetch("/api/build");
+        if (!response.ok) return;
+        const payload = (await response.json()) as { sources?: BuildSource[] };
+        if (payload.sources) {
+          setBuildSources(payload.sources);
+        }
+      } catch {
+        // ignore
+      }
+    };
+    void loadSources();
+  }, []);
 
   const groupedFiles = useMemo(
     () => (result ? groupFiles(result.files) : new Map<string, GeneratedFile[]>()),
@@ -229,8 +190,8 @@ export default function Page() {
     await generateWithUrl(url, rememberUrl);
   }
 
-  async function handleGenerateFromEnv(source: EnvSource) {
-    setUrl(source.url);
+  async function handleGenerateFromEnv(source: BuildSource) {
+    setUrl("");
     setStatus("loading");
     setError("");
     setResult(null);
@@ -365,9 +326,9 @@ export default function Page() {
           </>
         ) : null}
 
-        {envSources.length > 0 ? (
+        {buildSources.length > 0 ? (
           <div className="env-buttons">
-            {envSources.map((source) => (
+            {buildSources.map((source) => (
               <button
                 key={source.id}
                 type="button"

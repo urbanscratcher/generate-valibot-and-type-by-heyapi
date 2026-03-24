@@ -221,8 +221,8 @@ async function buildSource(source) {
 async function main() {
   await loadDotEnv();
   const sources = parseEnvSources(
-    process.env.OPENAPI_SOURCES ?? process.env.NEXT_PUBLIC_OPENAPI_SOURCES ?? "",
-    process.env.NEXT_PUBLIC_DOL_ADMIN ?? ""
+    process.env.OPENAPI_SOURCES ?? "",
+    process.env.DOL_ADMIN ?? ""
   );
 
   await fs.mkdir(CACHE_ROOT, { recursive: true });
