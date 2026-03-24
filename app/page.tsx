@@ -66,6 +66,7 @@ function groupFiles(files: GeneratedFile[]): Map<string, GeneratedFile[]> {
 
 
 export default function Page() {
+  const envUrl = process.env.NEXT_PUBLIC_DOL_ADMIN ?? "";
   const [url, setUrl] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -92,7 +93,10 @@ export default function Page() {
     if (remember === "0") {
       setRememberUrl(false);
     }
-  }, []);
+    if (!saved && envUrl) {
+      setUrl(envUrl);
+    }
+  }, [envUrl]);
 
   const groupedFiles = useMemo(
     () => (result ? groupFiles(result.files) : new Map<string, GeneratedFile[]>()),
@@ -238,6 +242,16 @@ export default function Page() {
           value={url}
           onChange={(event) => setUrl(event.target.value)}
         />
+        {envUrl ? (
+          <button
+            type="button"
+            onClick={() => {
+              setUrl(envUrl);
+            }}
+          >
+            DOL_ADMIN
+          </button>
+        ) : null}
         <button onClick={handleGenerate} disabled={status === "loading"}>
           {status === "loading" ? "생성 중…" : "생성"}
         </button>
