@@ -5,11 +5,7 @@ const nextConfig = {
   basePath,
   assetPrefix: basePath,
   images: { unoptimized: true },
-  outputFileTracingIncludes: {
-    "/api/openapi/refresh": [
-      "./node_modules/@hey-api/openapi-ts/**/*",
-    ],
-  },
+  serverExternalPackages: ["@hey-api/openapi-ts"],
 };
 
 export default nextConfig;
