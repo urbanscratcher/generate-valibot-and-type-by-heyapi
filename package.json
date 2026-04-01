@@ -10,6 +10,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@vercel/blob": "^0.27.0",
     "@hey-api/openapi-ts": "^0.94.4",
     "highlight.js": "^11.11.1",
     "next": "^15.2.4",
