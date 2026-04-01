@@ -5,6 +5,13 @@ import { parse as parseYaml } from "yaml";
 import { del, list, put } from "@vercel/blob";
 
 const INDEX_BLOB_PATH = "openapi/index.json";
+const DEFAULT_LOCAL_SOURCE_URL = "https://api.a.df.buttersoft.dev/v3/api-docs";
+const LOCAL_PUBLIC_ROOT = path.join(process.cwd(), "public", "openapi");
+const LOCAL_INDEX_PATH = path.join(LOCAL_PUBLIC_ROOT, "index.json");
+
+function useLocalCache() {
+  return process.env.NODE_ENV !== "production" && !process.env.BLOB_READ_WRITE_TOKEN;
+}
 
 type OpenApiSource = {
   id: string;
@@ -18,6 +25,16 @@ type BuildSourceEntry = {
   generatedAt: string;
   files: Array<{ path: string; lines: number; chars: number }>;
   version: string;
+};
+
+export type EndpointItem = {
+  operation: string;
+  method: string;
+  url: string;
+  domain: string;
+  description: string;
+  dataType: string;
+  responseType: string;
 };
 
 function parseEnvSources(raw: string, legacyUrl: string): OpenApiSource[] {
@@ -44,6 +61,9 @@ function parseEnvSources(raw: string, legacyUrl: string): OpenApiSource[] {
 
   if (legacyUrl && legacyUrl.trim().length > 0) {
     return [{ id: "dol_admin", label: "DOL_ADMIN", url: legacyUrl.trim() }];
+  }
+  if (process.env.NODE_ENV !== "production") {
+    return [{ id: "dol_admin", label: "DOL_ADMIN", url: DEFAULT_LOCAL_SOURCE_URL }];
   }
   return [];
 }
@@ -149,17 +169,28 @@ async function buildSource(source: OpenApiSource): Promise<BuildSourceEntry> {
       chars: file.content.length,
     }));
 
-    const prefix = `openapi/${source.id}/`;
-    const existing = await list({ prefix });
-    if (existing.blobs.length > 0) {
-      await del(existing.blobs.map((blob) => blob.url));
-    }
-    for (const file of files) {
-      await put(`${prefix}${file.path}`, file.content, {
-        access: "public",
-        addRandomSuffix: false,
-        contentType: "text/plain; charset=utf-8",
-      });
+    if (useLocalCache()) {
+      const targetDir = path.join(LOCAL_PUBLIC_ROOT, source.id);
+      await fs.rm(targetDir, { recursive: true, force: true });
+      await fs.mkdir(targetDir, { recursive: true });
+      for (const file of files) {
+        const fullPath = path.join(targetDir, file.path);
+        await fs.mkdir(path.dirname(fullPath), { recursive: true });
+        await fs.writeFile(fullPath, file.content, "utf8");
+      }
+    } else {
+      const prefix = `openapi/${source.id}/`;
+      const existing = await list({ prefix });
+      if (existing.blobs.length > 0) {
+        await del(existing.blobs.map((blob) => blob.url));
+      }
+      for (const file of files) {
+        await put(`${prefix}${file.path}`, file.content, {
+          access: "public",
+          addRandomSuffix: false,
+          contentType: "text/plain; charset=utf-8",
+        });
+      }
     }
 
     return {
@@ -176,12 +207,17 @@ async function buildSource(source: OpenApiSource): Promise<BuildSourceEntry> {
 
 async function readBuildIndex(): Promise<BuildSourceEntry[]> {
   try {
-    const listed = await list({ prefix: INDEX_BLOB_PATH });
-    const exact = listed.blobs.find((blob) => blob.pathname === INDEX_BLOB_PATH);
-    if (!exact) return [];
-    const response = await fetch(exact.url, { cache: "no-store" });
-    if (!response.ok) return [];
-    const raw = await response.text();
+    let raw = "";
+    if (useLocalCache()) {
+      raw = await fs.readFile(LOCAL_INDEX_PATH, "utf8");
+    } else {
+      const listed = await list({ prefix: INDEX_BLOB_PATH });
+      const exact = listed.blobs.find((blob) => blob.pathname === INDEX_BLOB_PATH);
+      if (!exact) return [];
+      const response = await fetch(exact.url, { cache: "no-store" });
+      if (!response.ok) return [];
+      raw = await response.text();
+    }
     const parsed = JSON.parse(raw) as { sources?: BuildSourceEntry[] };
     return parsed.sources ?? [];
   } catch {
@@ -190,6 +226,11 @@ async function readBuildIndex(): Promise<BuildSourceEntry[]> {
 }
 
 async function writeBuildIndex(entries: BuildSourceEntry[]) {
+  if (useLocalCache()) {
+    await fs.mkdir(LOCAL_PUBLIC_ROOT, { recursive: true });
+    await fs.writeFile(LOCAL_INDEX_PATH, JSON.stringify({ sources: entries }, null, 2), "utf8");
+    return;
+  }
   await put(INDEX_BLOB_PATH, JSON.stringify({ sources: entries }, null, 2), {
     access: "public",
     addRandomSuffix: false,
@@ -245,20 +286,123 @@ export async function refreshOpenApiSource(sourceId: string) {
 }
 
 export async function getOpenApiIndex() {
+  await loadDotEnv();
+  const configured = parseEnvSources(process.env.OPENAPI_SOURCES ?? "", process.env.DOL_ADMIN ?? "");
   const entries = await readBuildIndex();
-  return { sources: entries };
+
+  if (configured.length === 0) {
+    return { sources: entries };
+  }
+
+  const merged = configured.map((source) => {
+    const built = entries.find((item) => item.id === source.id);
+    if (built) return built;
+    return {
+      id: source.id,
+      label: source.label,
+      generatedAt: undefined,
+      files: [],
+      version: "unknown",
+    };
+  });
+
+  return { sources: merged };
 }
 
 export async function getOpenApiFile(sourceId: string, filePath: string) {
+  if (useLocalCache()) {
+    const localPath = path.join(LOCAL_PUBLIC_ROOT, sourceId, filePath);
+    try {
+      return await fs.readFile(localPath, "utf8");
+    } catch {
+      throw new Error("file not found");
+    }
+  }
   const pathname = `openapi/${sourceId}/${filePath}`;
   const listed = await list({ prefix: pathname });
   const exact = listed.blobs.find((blob) => blob.pathname === pathname);
-  if (!exact) {
-    throw new Error("file not found");
-  }
+  if (!exact) throw new Error("file not found");
   const response = await fetch(exact.url, { cache: "no-store" });
-  if (!response.ok) {
-    throw new Error("failed to fetch blob content");
-  }
+  if (!response.ok) throw new Error("failed to fetch blob content");
   return await response.text();
+}
+
+function parseComment(rawComment?: string): string {
+  if (!rawComment) return "";
+  return rawComment
+    .split("\n")
+    .map((line) => line.replace(/^\s*\*\s?/, "").trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
+function parseSdkEndpoints(content: string): EndpointItem[] {
+  const regex =
+    /(?:\/\*\*([\s\S]*?)\*\/\s*)?export const\s+(\w+)\s*=([\s\S]*?)\(options\.client\s*\?\?\s*client\)\.(\w+)<([\s\S]*?)>\(\{([\s\S]*?)\}\);/g;
+
+  const endpoints: EndpointItem[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(content)) !== null) {
+    const comment = parseComment(match[1]);
+    const operation = match[2] ?? "";
+    const signaturePart = match[3] ?? "";
+    const clientMethod = (match[4] ?? "").toUpperCase();
+    const genericPart = match[5] ?? "";
+    const requestObject = match[6] ?? "";
+
+    const urlMatch = requestObject.match(/url:\s*"([^"]+)"/);
+    const dataTypeMatch = signaturePart.match(/options:\s*Options<([^,>]+)/);
+    const responseTypeMatch = genericPart.match(/^\s*([^,>\s]+)/);
+    if (!urlMatch?.[1]) continue;
+
+    endpoints.push({
+      operation,
+      method: clientMethod,
+      url: urlMatch[1],
+      domain: getDomainFromUrl(urlMatch[1]),
+      description: comment,
+      dataType: dataTypeMatch?.[1]?.trim() ?? "-",
+      responseType: responseTypeMatch?.[1]?.trim() ?? "-",
+    });
+  }
+  return endpoints;
+}
+
+function getDomainFromUrl(url: string): string {
+  const segments = url.split("/").filter(Boolean);
+  if (segments.length === 0) return "others";
+  if (segments[0] === "admin") {
+    return segments[1] ?? "admin";
+  }
+  return segments[0];
+}
+
+function normalizeText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s/_-]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export async function searchOpenApiEndpoints(sourceId: string, query: string) {
+  const sdk = await getOpenApiFile(sourceId, "sdk.gen.ts");
+  const endpoints = parseSdkEndpoints(sdk);
+  const q = normalizeText(query);
+  if (!q) return endpoints;
+  const tokens = q.split(/\s+/).filter(Boolean);
+  return endpoints.filter((endpoint) => {
+    const haystack = normalizeText(
+      [
+      endpoint.operation,
+      endpoint.method,
+      endpoint.url,
+      endpoint.domain,
+      endpoint.description,
+      endpoint.dataType,
+      endpoint.responseType,
+    ].join(" ")
+    );
+    return tokens.every((token) => haystack.includes(token));
+  });
 }

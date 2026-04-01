@@ -5,6 +5,7 @@ import { parse as parseYaml } from "yaml";
 
 const PUBLIC_ROOT = path.join(process.cwd(), "public", "openapi");
 const BUILD_INDEX_PATH = path.join(PUBLIC_ROOT, "index.json");
+const DEFAULT_LOCAL_SOURCE_URL = "https://api.a.df.buttersoft.dev/v3/api-docs";
 
 function parseEnvSources(raw, legacyUrl) {
   const trimmed = (raw ?? "").trim();
@@ -47,6 +48,9 @@ function parseEnvSources(raw, legacyUrl) {
 
   if (legacyUrl && legacyUrl.trim().length > 0) {
     return [{ id: "dol_admin", label: "DOL_ADMIN", url: legacyUrl.trim() }];
+  }
+  if (process.env.NODE_ENV !== "production") {
+    return [{ id: "dol_admin", label: "DOL_ADMIN", url: DEFAULT_LOCAL_SOURCE_URL }];
   }
   return [];
 }

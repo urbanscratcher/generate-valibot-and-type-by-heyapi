@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import hljs from "highlight.js/lib/core";
 import typescript from "highlight.js/lib/languages/typescript";
 
@@ -396,6 +397,9 @@ export default function Page() {
   return (
     <div className="app">
       <h1>OpenAPI Snippet</h1>
+      <div>
+        <Link href="/search">/search로 이동</Link>
+      </div>
       <div className="panel">
         {buildSources.length > 0 ? (
           <div className="env-buttons">
